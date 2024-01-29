@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Visual Simulation</title>
+    <style>
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f0f0;
+        font-family: Arial, sans-serif;
+      }
+
+      #simulationCanvas {
+        border: 2px solid #333;
+        background-color: #fff;
+        display: flex;
+      }
+
+      h1 {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #333;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Visual Simulation</h1>
+    <div id="simulationCanvas"></div>
+    <!-- Container for the simulation -->
+
+    <script src="bundle.js"></script>
+  </body>
+</html>
