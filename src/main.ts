@@ -62,18 +62,36 @@ class Simulation {
     // Initialize an array to hold static bodies
     const staticBodies: Body[] = [];
 
-    // Add bodies to simulate nodes, positioned on the ground and initially static
-    for (let i = 0; i < 50; i++) {
-      const x = Math.random() * 800; // Random x position along the ground
-      const y = 580 - 5; // Slightly above the ground to prevent overlap with the ground body
+    const centerX = 400; // Center X coordinate of the canvas
+    const centerY = 300; // Center Y coordinate of the canvas
+    const size = 5; // Size of the bodies
+    const layerDistance = 5 * size + 5; // Distance between layers
 
-      const circle = Bodies.circle(x, y, 5, {
-        isStatic: true, // Start as static
-        angle: -Math.PI / 2 // Aimed directly upward
-      });
+    let bodiesCount = 0;
+    let layer = 0;
 
-      World.add(this.engine.world, circle);
-      staticBodies.push(circle); // Add to static bodies array
+    while (bodiesCount < 50) { // Adjust the total count as needed for a complete hexagonal pattern
+      const bodiesInLayer = layer === 0 ? 1 : 6 * layer;
+      const angleStep = Math.PI * 2 / bodiesInLayer; // Angle step for bodies in the current layer
+
+      for (let i = 0; i < bodiesInLayer; i++) {
+        const angle = angleStep * i;
+        const x = centerX + (layerDistance * layer) * Math.cos(angle);
+        const y = centerY + (layerDistance * layer) * Math.sin(angle);
+
+        const circle = Bodies.circle(x, y, size, {
+          isStatic: true, // Start as static
+          angle: angle + Math.PI / 2 // Aimed outward from the center
+        });
+
+        World.add(this.engine.world, circle);
+        staticBodies.push(circle);
+
+        bodiesCount++;
+        if (bodiesCount >= 50) break; // Stop if the total count reaches the limit
+      }
+
+      layer++;
     }
 
     // Periodically make a random body dynamic
