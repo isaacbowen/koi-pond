@@ -8,7 +8,7 @@ class Simulation {
     // Create an engine
     this.engine = Engine.create();
     this.engine.gravity.y = 0; // Reduce or eliminate gravity
-    this.engine.timing.timeScale = 0.2; // Slow down time, 0.5 is half the normal speed
+    this.engine.timing.timeScale = 1; // Slow down time, 0.5 is half the normal speed
 
     // Create a renderer
     this.render = Render.create({
@@ -70,7 +70,7 @@ class Simulation {
     let bodiesCount = 0;
     let layer = 0;
 
-    while (bodiesCount < 50) { // Adjust the total count as needed for a complete hexagonal pattern
+    while (bodiesCount < 60) { // Adjust the total count as needed for a complete hexagonal pattern
       const bodiesInLayer = layer === 0 ? 1 : 6 * layer;
       const angleStep = Math.PI * 2 / bodiesInLayer; // Angle step for bodies in the current layer
 
@@ -88,7 +88,6 @@ class Simulation {
         staticBodies.push(circle);
 
         bodiesCount++;
-        if (bodiesCount >= 50) break; // Stop if the total count reaches the limit
       }
 
       layer++;
@@ -115,7 +114,7 @@ class Simulation {
       } else {
         clearInterval(intervalId); // Stop the interval when all bodies are dynamic
       }
-    }, this.engine.timing.timeScale * 10000);
+    }, 1000 / this.engine.timing.timeScale);
   }
 
   updateNodes() {
@@ -207,11 +206,12 @@ class Simulation {
   }
 
   calculateSteeringDirection(body: Body) {
-    const fieldOfView = Math.PI; // 180 degrees in radians
+    const currentDirection: Vector = { x: Math.cos(body.angle), y: Math.sin(body.angle) };
+    const fieldOfView = Math.PI * 0.75; // lil less than 180 degrees
     const visibleBodies = this.getVisibleBodies(body, fieldOfView);
 
     if (visibleBodies.length === 0) {
-      return { x: Math.cos(body.angle), y: Math.sin(body.angle) }; // Maintain current direction if no visible bodies
+      return currentDirection; // Maintain current direction if no visible bodies
     }
 
     // B1: Nearest visible body to B0
@@ -221,8 +221,9 @@ class Simulation {
     const B2 = this.getNonOccludedNeighbor(B1, visibleBodies, body);
 
     if (!B2) {
-      // If there's no B2, steer towards B1
-      return this.steerTowards(body, B1.position);
+      // If there's no B2, maintain current direction
+      // return this.steerTowards(body, B1.position);
+      return currentDirection;
     }
 
     // Steer towards midpoint between B1 and B2
