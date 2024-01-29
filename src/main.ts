@@ -8,7 +8,7 @@ class Simulation {
     // Create an engine
     this.engine = Engine.create();
     this.engine.gravity.y = 0; // Reduce or eliminate gravity
-    this.engine.timing.timeScale = 1; // Slow down time, 0.5 is half the normal speed
+    this.engine.timing.timeScale = 0.2; // Slow down time, 0.5 is half the normal speed
 
     // Create a renderer
     this.render = Render.create({
@@ -59,20 +59,16 @@ class Simulation {
   }
 
   addBodies() {
-    // Initialize an array to hold static bodies
-    const staticBodies: Body[] = [];
+    const bodies: Body[] = []; // All bodies, both static and dynamic
+    const centerX = 400;
+    const centerY = 300;
+    const size = 5;
+    const layerDistance = 5 * size + 5;
 
-    const centerX = 400; // Center X coordinate of the canvas
-    const centerY = 300; // Center Y coordinate of the canvas
-    const size = 5; // Size of the bodies
-    const layerDistance = 5 * size + 5; // Distance between layers
-
-    let bodiesCount = 0;
     let layer = 0;
-
-    while (bodiesCount < 60) { // Adjust the total count as needed for a complete hexagonal pattern
+    while (bodies.length < 60) { // Adjust for a complete hexagonal pattern
       const bodiesInLayer = layer === 0 ? 1 : 6 * layer;
-      const angleStep = Math.PI * 2 / bodiesInLayer; // Angle step for bodies in the current layer
+      const angleStep = Math.PI * 2 / bodiesInLayer;
 
       for (let i = 0; i < bodiesInLayer; i++) {
         const angle = angleStep * i;
@@ -81,40 +77,38 @@ class Simulation {
 
         const circle = Bodies.circle(x, y, size, {
           isStatic: true, // Start as static
-          angle: angle + Math.PI / 2 // Aimed outward from the center
+          angle: angle + Math.PI / 2
         });
 
         World.add(this.engine.world, circle);
-        staticBodies.push(circle);
-
-        bodiesCount++;
+        bodies.push(circle); // Add to bodies array
       }
 
       layer++;
     }
 
-    // Periodically make a random body dynamic
-    const intervalId = setInterval(() => {
-      if (staticBodies.length > 0) {
-        const randomIndex = Math.floor(Math.random() * staticBodies.length);
-        const body = staticBodies[randomIndex];
+    setInterval(() => {
+      const body = bodies.shift()!;
+      this.toggleBody(body);
+      bodies.push(body);
+    }, 100 / this.engine.timing.timeScale);
+  }
 
-        // Make the body dynamic
-        Body.setStatic(body, false);
-
-        // Style the body
-        body.render.fillStyle = '#F35'; // Example fill color, change as needed
-        body.render.strokeStyle = '#F35'; // Example stroke color, change as needed
-        body.render.lineWidth = 1; // Set the stroke width (optional)
-        body.render.opacity = 1; // Ensure full opacity
-        body.render.sprite = undefined;
-
-        // Remove the body from the static bodies array
-        staticBodies.splice(randomIndex, 1);
-      } else {
-        clearInterval(intervalId); // Stop the interval when all bodies are dynamic
-      }
-    }, 1000 / this.engine.timing.timeScale);
+  toggleBody(body: Body) {
+    if (body.isStatic) {
+      body.render.fillStyle = '#F35';
+      body.render.lineWidth = 0;
+      body.render.opacity = 1;
+      body.render.sprite = undefined;
+      Body.setStatic(body, false);
+    } else {
+      body.render.fillStyle = 'transparent';
+      body.render.strokeStyle = '#aaa';
+      body.render.lineWidth = 2;
+      body.render.opacity = 1;
+      body.render.sprite = undefined;
+      Body.setStatic(body, true);
+    }
   }
 
   updateNodes() {
