@@ -1,4 +1,4 @@
-import { default as Matter, Engine, Render, Bodies, World, Runner, Body, Events, Query, Vector } from 'matter-js';
+import { Engine, Render, Bodies, World, Runner, Body, Events, Query, Vector } from 'matter-js';
 
 class Simulation {
   engine: Engine;
@@ -10,49 +10,66 @@ class Simulation {
     this.engine.gravity.y = 0; // Reduce or eliminate gravity
     this.engine.timing.timeScale = 0.2; // Slow down time, 0.5 is half the normal speed
 
+    // Initial canvas size
+    const initialWidth = window.innerWidth;
+    const initialHeight = window.innerHeight;
+
     // Create a renderer
+    const canvasElement = document.getElementById(elementId)!;
     this.render = Render.create({
-      element: document.getElementById(elementId)!,
+      element: canvasElement,
       engine: this.engine,
       options: {
-        width: 800,
-        height: 600,
+        width: initialWidth,
+        height: initialHeight,
         wireframes: false
       }
     });
 
+    // Additional setup...
     this.applyCircularCurrent();
-
-    // Add bodies to the world
     this.addBodies();
-
-    // Activate node updating logic
     this.updateNodes();
-
-    // Run the engine
     Runner.run(this.engine);
-
-    // Run the renderer
     Render.run(this.render);
+
+    // Handle window resize
+    window.addEventListener('resize', () => this.handleResize());
+  }
+
+  handleResize() {
+    // Update the render dimensions to match the window size
+    this.render.canvas.width = window.innerWidth;
+    this.render.canvas.height = window.innerHeight;
+    this.render.options.width = window.innerWidth;
+    this.render.options.height = window.innerHeight;
+
+    // Update the engine bounds
+    this.engine.world.bounds.max.x = window.innerWidth;
+    this.engine.world.bounds.max.y = window.innerHeight;
+
+    // Center the view (optional)
+    Render.lookAt(this.render, {
+      min: { x: 0, y: 0 },
+      max: { x: window.innerWidth, y: window.innerHeight }
+    });
   }
 
   applyCircularCurrent() {
-    const centerX = 800 / 2; // Assuming canvas width is 800
-    const centerY = 600 / 2; // Assuming canvas height is 600
     const currentStrength = 0.00005; // Adjust this value to control the strength of the current
 
     Events.on(this.engine, 'beforeUpdate', () => {
       this.engine.world.bodies.forEach(body => {
         if (!body.isStatic) {
           // Calculate the vector from the body to the center of the canvas
-          const toCenter = Matter.Vector.sub({ x: centerX, y: centerY }, body.position);
+          const toCenter = Vector.sub({ x: this.render.canvas.width / 2, y: this.render.canvas.height / 2 }, body.position);
 
           // Calculate a perpendicular vector to create a circular motion (counter-clockwise)
-          const perpendicular = Matter.Vector.perp(toCenter);
-          const normalized = Matter.Vector.normalise(perpendicular);
+          const perpendicular = Vector.perp(toCenter);
+          const normalized = Vector.normalise(perpendicular);
 
           // Apply the force to induce circular motion
-          Body.applyForce(body, body.position, Matter.Vector.mult(normalized, currentStrength));
+          Body.applyForce(body, body.position, Vector.mult(normalized, currentStrength));
         }
       });
     });
@@ -60,8 +77,8 @@ class Simulation {
 
   addBodies() {
     const bodies: Body[] = []; // All bodies, both static and dynamic
-    const centerX = 400;
-    const centerY = 300;
+    const centerX = this.render.canvas.width / 2;
+    const centerY = this.render.canvas.height / 2;
     const size = 5;
     const layerDistance = 5 * size + 5;
 
@@ -128,12 +145,12 @@ class Simulation {
 
           // Calculate repulsion from nearby bodies for breathing room
           const repulsion = this.calculateRepulsion(body, minDistance);
-          force = Matter.Vector.add(force, repulsion);
+          force = Vector.add(force, repulsion);
 
           // If the body is not too close to others, apply steering direction
-          if (Matter.Vector.magnitude(repulsion) < 0.01) {
+          if (Vector.magnitude(repulsion) < 0.01) {
             const steeringDirection = this.calculateSteeringDirection(body);
-            force = Matter.Vector.add(force, steeringDirection);
+            force = Vector.add(force, steeringDirection);
           }
 
           // Check for boundaries and steer back if necessary
@@ -143,12 +160,12 @@ class Simulation {
           Body.applyForce(body, body.position, { x: force.x * 0.001, y: force.y * 0.001 });
 
           // Enforce velocity envelope
-          const currentSpeed = Matter.Vector.magnitude(body.velocity);
+          const currentSpeed = Vector.magnitude(body.velocity);
           if (currentSpeed > maxSpeed) {
-            const scaledVelocity = Matter.Vector.normalise(body.velocity);
+            const scaledVelocity = Vector.normalise(body.velocity);
             Body.setVelocity(body, { x: scaledVelocity.x * maxSpeed, y: scaledVelocity.y * maxSpeed });
           } else if (currentSpeed < minSpeed) {
-            const scaledVelocity = Matter.Vector.normalise(body.velocity);
+            const scaledVelocity = Vector.normalise(body.velocity);
             Body.setVelocity(body, { x: scaledVelocity.x * minSpeed, y: scaledVelocity.y * minSpeed });
           }
 
@@ -186,12 +203,12 @@ class Simulation {
 
     this.engine.world.bodies.forEach(other => {
       if (body !== other && !other.isStatic) {
-        const distanceVector = Matter.Vector.sub(body.position, other.position);
-        const distanceMagnitude = Matter.Vector.magnitude(distanceVector);
+        const distanceVector = Vector.sub(body.position, other.position);
+        const distanceMagnitude = Vector.magnitude(distanceVector);
 
         if (distanceMagnitude < minDistance && distanceMagnitude > 0) {
-          const repelForce = Matter.Vector.div(distanceVector, distanceMagnitude * distanceMagnitude);
-          repulsion = Matter.Vector.add(repulsion, repelForce);
+          const repelForce = Vector.div(distanceVector, distanceMagnitude * distanceMagnitude);
+          repulsion = Vector.add(repulsion, repelForce);
         }
       }
     });
@@ -229,17 +246,17 @@ class Simulation {
     return this.engine.world.bodies.filter(other => {
       if (other === body || other.isStatic) return false;
 
-      const toOther = Matter.Vector.sub(other.position, body.position);
-      const bodyDirection = Matter.Vector.create(Math.cos(body.angle), Math.sin(body.angle));
+      const toOther = Vector.sub(other.position, body.position);
+      const bodyDirection = Vector.create(Math.cos(body.angle), Math.sin(body.angle));
 
-      const angleToOther = Matter.Vector.angle(bodyDirection, toOther);
+      const angleToOther = Vector.angle(bodyDirection, toOther);
 
       // Check if within field of view
       return angleToOther <= fieldOfView / 2;
     }).sort((a, b) => {
       // Sort by distance to B0
-      const distanceA = Matter.Vector.magnitude(Matter.Vector.sub(body.position, a.position));
-      const distanceB = Matter.Vector.magnitude(Matter.Vector.sub(body.position, b.position));
+      const distanceA = Vector.magnitude(Vector.sub(body.position, a.position));
+      const distanceB = Vector.magnitude(Vector.sub(body.position, b.position));
       return distanceA - distanceB;
     });
   }
@@ -258,16 +275,16 @@ class Simulation {
 
   isOccluded(B0: Body, B1: Body, B2: Body) {
     // Simplified occlusion check: if the distance from B0 to B2 is greater than B0 to B1, and B1 to B2 is less than B0 to B1, consider B2 occluded by B1
-    const distanceB0B2 = Matter.Vector.magnitude(Matter.Vector.sub(B0.position, B2.position));
-    const distanceB0B1 = Matter.Vector.magnitude(Matter.Vector.sub(B0.position, B1.position));
-    const distanceB1B2 = Matter.Vector.magnitude(Matter.Vector.sub(B1.position, B2.position));
+    const distanceB0B2 = Vector.magnitude(Vector.sub(B0.position, B2.position));
+    const distanceB0B1 = Vector.magnitude(Vector.sub(B0.position, B1.position));
+    const distanceB1B2 = Vector.magnitude(Vector.sub(B1.position, B2.position));
 
     return distanceB0B2 > distanceB0B1 && distanceB1B2 < distanceB0B1;
   }
 
   steerTowards(body: Body, target: Vector) {
-    const desiredDirection = Matter.Vector.sub(target, body.position);
-    const normalizedDesiredDirection = Matter.Vector.normalise(desiredDirection);
+    const desiredDirection = Vector.sub(target, body.position);
+    const normalizedDesiredDirection = Vector.normalise(desiredDirection);
     return normalizedDesiredDirection; // This vector can be scaled as needed
   }
 }
