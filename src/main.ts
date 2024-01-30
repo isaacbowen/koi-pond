@@ -8,7 +8,7 @@ class Simulation {
     // Create an engine
     this.engine = Engine.create();
     this.engine.gravity.y = 0; // Reduce or eliminate gravity
-    this.engine.timing.timeScale = 0.2; // Slow down time, 0.5 is half the normal speed
+    this.engine.timing.timeScale = 1; // Slow down time, 0.5 is half the normal speed
 
     // Initial canvas size
     const initialWidth = window.innerWidth;
@@ -132,8 +132,6 @@ class Simulation {
     const minDistance = 50; // Minimum distance for breathing room
     const maxSpeed = 5; // Maximum speed a body can have
     const minSpeed = 1; // Minimum speed to ensure bodies are always moving
-    const canvasWidth = 800; // Width of the canvas
-    const canvasHeight = 600; // Height of the canvas
     const boundaryMargin = 10; // Distance from the edge within which bodies start turning back
 
     Events.on(this.engine, 'beforeUpdate', () => {
@@ -154,7 +152,7 @@ class Simulation {
           }
 
           // Check for boundaries and steer back if necessary
-          force = this.checkForBoundaries(body, force, canvasWidth, canvasHeight, boundaryMargin);
+          force = this.checkForBoundaries(body, force, this.render.canvas.width, this.render.canvas.height, boundaryMargin);
 
           // Apply the force as acceleration
           Body.applyForce(body, body.position, { x: force.x * 0.001, y: force.y * 0.001 });
@@ -274,12 +272,22 @@ class Simulation {
   }
 
   isOccluded(B0: Body, B1: Body, B2: Body) {
-    // Simplified occlusion check: if the distance from B0 to B2 is greater than B0 to B1, and B1 to B2 is less than B0 to B1, consider B2 occluded by B1
-    const distanceB0B2 = Vector.magnitude(Vector.sub(B0.position, B2.position));
-    const distanceB0B1 = Vector.magnitude(Vector.sub(B0.position, B1.position));
-    const distanceB1B2 = Vector.magnitude(Vector.sub(B1.position, B2.position));
+    // Vector from B0 to B1
+    const vectorB0B1 = Vector.sub(B1.position, B0.position);
+    const normalizedB0B1 = Vector.normalise(vectorB0B1);
 
-    return distanceB0B2 > distanceB0B1 && distanceB1B2 < distanceB0B1;
+    // Vector from B0 to B2
+    const vectorB0B2 = Vector.sub(B2.position, B0.position);
+    const normalizedB0B2 = Vector.normalise(vectorB0B2);
+
+    // Calculate the dot product of the normalized vectors
+    const dotProduct = Vector.dot(normalizedB0B1, normalizedB0B2);
+
+    // Calculate the angle in degrees between the vectors
+    const angleBetween = Math.acos(dotProduct) * (180 / Math.PI);
+
+    // If the angle is less than 15 degrees, consider B2 occluded by B1
+    return angleBetween < 5;
   }
 
   steerTowards(body: Body, target: Vector) {
