@@ -1,18 +1,19 @@
-import { Engine, Render, Bodies, World, Runner, Body, Events, Query, Vector } from 'matter-js';
+import { Engine, Render, Bodies, World, Runner, Body, Events, Vector } from 'matter-js';
 
 class Simulation {
   engine: Engine;
   render: Render;
+  scale: number;
+  circleSize: number;
 
   constructor(elementId: string) {
+    this.scale = 2;
+    this.circleSize = 5 * this.scale;
+
     // Create an engine
     this.engine = Engine.create();
     this.engine.gravity.y = 0; // Reduce or eliminate gravity
-    this.engine.timing.timeScale = 1; // Slow down time, 0.5 is half the normal speed
-
-    // Initial canvas size
-    const initialWidth = window.innerWidth;
-    const initialHeight = window.innerHeight;
+    this.engine.timing.timeScale = 0.6; // Slow down time, 0.5 is half the normal speed
 
     // Create a renderer
     const canvasElement = document.getElementById(elementId)!;
@@ -20,8 +21,8 @@ class Simulation {
       element: canvasElement,
       engine: this.engine,
       options: {
-        width: initialWidth,
-        height: initialHeight,
+        width: window.innerWidth,
+        height: window.innerHeight,
         wireframes: false
       }
     });
@@ -29,7 +30,8 @@ class Simulation {
     // Additional setup...
     this.applyCircularCurrent();
     this.addBodies();
-    this.updateNodes();
+    this.manageBodyDynamics();
+    this.manageBodyShape();
     Runner.run(this.engine);
     Render.run(this.render);
 
@@ -56,7 +58,7 @@ class Simulation {
   }
 
   applyCircularCurrent() {
-    const currentStrength = 0.00005; // Adjust this value to control the strength of the current
+    const currentStrength = 0.0005; // Adjust this value to control the strength of the current
 
     Events.on(this.engine, 'beforeUpdate', () => {
       this.engine.world.bodies.forEach(body => {
@@ -79,8 +81,8 @@ class Simulation {
     const bodies: Body[] = []; // All bodies, both static and dynamic
     const centerX = this.render.canvas.width / 2;
     const centerY = this.render.canvas.height / 2;
-    const size = 5;
-    const layerDistance = 5 * size + 5;
+    const size = this.circleSize;
+    const layerDistance = 7 * size;
 
     let layer = 0;
     while (bodies.length < 60) { // Adjust for a complete hexagonal pattern
@@ -93,9 +95,10 @@ class Simulation {
         const y = centerY + (layerDistance * layer) * Math.sin(angle);
 
         const circle = Bodies.circle(x, y, size, {
-          isStatic: true, // Start as static
           angle: angle + Math.PI / 2
         });
+
+        this.setBodyStatic(circle);
 
         World.add(this.engine.world, circle);
         bodies.push(circle); // Add to bodies array
@@ -113,62 +116,106 @@ class Simulation {
 
   toggleBody(body: Body) {
     if (body.isStatic) {
-      body.render.fillStyle = '#F35';
-      body.render.lineWidth = 0;
-      body.render.opacity = 1;
-      body.render.sprite = undefined;
-      Body.setStatic(body, false);
+      this.setBodyDynamic(body);
     } else {
-      body.render.fillStyle = 'transparent';
-      body.render.strokeStyle = '#aaa';
-      body.render.lineWidth = 2;
-      body.render.opacity = 1;
-      body.render.sprite = undefined;
-      Body.setStatic(body, true);
+      this.setBodyStatic(body);
     }
   }
 
-  updateNodes() {
-    const minDistance = 50; // Minimum distance for breathing room
+  setBodyDynamic(body: Body) {
+    body.render.fillStyle = '#F35';
+    body.render.lineWidth = 0;
+    body.render.opacity = 1;
+    Body.setStatic(body, false);
+  }
+
+  setBodyStatic(body: Body) {
+    body.render.fillStyle = 'transparent';
+    body.render.strokeStyle = '#aaa';
+    body.render.lineWidth = (2 * this.scale);
+    body.render.opacity = 1;
+    Body.setStatic(body, true);
+  }
+
+  manageBodyDynamics() {
+    const minDistance = this.circleSize * 10; // Minimum distance for breathing room
     const maxSpeed = 5; // Maximum speed a body can have
     const minSpeed = 1; // Minimum speed to ensure bodies are always moving
-    const boundaryMargin = 10; // Distance from the edge within which bodies start turning back
+    const boundaryMargin = (10 * this.scale); // Distance from the edge within which bodies start turning back
 
     Events.on(this.engine, 'beforeUpdate', () => {
       const { world } = this.engine;
 
       world.bodies.forEach(body => {
-        if (!body.isStatic) {
-          let force = { x: 0, y: 0 };
+        if (body.isStatic) return;
 
-          // Calculate repulsion from nearby bodies for breathing room
-          const repulsion = this.calculateRepulsion(body, minDistance);
-          force = Vector.add(force, repulsion);
+        let force = { x: 0, y: 0 };
 
-          // If the body is not too close to others, apply steering direction
-          if (Vector.magnitude(repulsion) < 0.01) {
-            const steeringDirection = this.calculateSteeringDirection(body);
-            force = Vector.add(force, steeringDirection);
-          }
+        // Calculate repulsion from nearby bodies for breathing room
+        const repulsion = this.calculateRepulsion(body, minDistance);
+        force = Vector.add(force, repulsion);
 
-          // Check for boundaries and steer back if necessary
-          force = this.checkForBoundaries(body, force, this.render.canvas.width, this.render.canvas.height, boundaryMargin);
+        // If the body is not too close to others, apply steering direction
+        if (Vector.magnitude(repulsion) < 0.01) {
+          const steeringDirection = this.calculateSteeringDirection(body);
+          force = Vector.add(force, steeringDirection);
+        }
 
-          // Apply the force as acceleration
-          Body.applyForce(body, body.position, { x: force.x * 0.001, y: force.y * 0.001 });
+        // Check for boundaries and steer back if necessary
+        force = this.checkForBoundaries(body, force, this.render.canvas.width, this.render.canvas.height, boundaryMargin);
 
-          // Enforce velocity envelope
-          const currentSpeed = Vector.magnitude(body.velocity);
-          if (currentSpeed > maxSpeed) {
-            const scaledVelocity = Vector.normalise(body.velocity);
-            Body.setVelocity(body, { x: scaledVelocity.x * maxSpeed, y: scaledVelocity.y * maxSpeed });
-          } else if (currentSpeed < minSpeed) {
-            const scaledVelocity = Vector.normalise(body.velocity);
-            Body.setVelocity(body, { x: scaledVelocity.x * minSpeed, y: scaledVelocity.y * minSpeed });
-          }
+        // Apply the force as acceleration
+        Body.applyForce(body, body.position, { x: force.x * 0.001, y: force.y * 0.001 });
 
-          // Update orientation based on velocity
-          Body.setAngle(body, Math.atan2(body.velocity.y, body.velocity.x));
+        // Enforce velocity envelope
+        const currentSpeed = Vector.magnitude(body.velocity);
+        if (currentSpeed > maxSpeed) {
+          const scaledVelocity = Vector.normalise(body.velocity);
+          Body.setVelocity(body, { x: scaledVelocity.x * maxSpeed, y: scaledVelocity.y * maxSpeed });
+        } else if (currentSpeed < minSpeed) {
+          const scaledVelocity = Vector.normalise(body.velocity);
+          Body.setVelocity(body, { x: scaledVelocity.x * minSpeed, y: scaledVelocity.y * minSpeed });
+        }
+
+        // Update orientation based on velocity
+        Body.setAngle(body, Math.atan2(body.velocity.y, body.velocity.x));
+      });
+    });
+  }
+
+  manageBodyShape() {
+    Events.on(this.engine, 'beforeUpdate', () => {
+      this.engine.world.bodies.forEach(body => {
+        body.render.visible = body.isStatic;
+      });
+    });
+
+    Events.on(this.render, 'afterRender', (event) => {
+      const { context } = this.render;
+      this.engine.world.bodies.forEach(body => {
+        if (!body.isStatic && !body.render.visible) {
+          // Custom rendering logic for bodies with default rendering disabled
+          const speed = Vector.magnitude(body.velocity);
+          const maxSpeed = 20; // Adjust as necessary
+          const elongationFactor = Math.min(speed / maxSpeed, 1);
+
+          const length = this.circleSize + (this.circleSize * elongationFactor * 0.8);
+          const width = this.circleSize * (1 - (elongationFactor * 0.5));
+
+          context.save();
+          context.translate(body.position.x, body.position.y);
+          context.rotate(Math.atan2(body.velocity.y, body.velocity.x));
+          context.scale(length / this.circleSize, width / this.circleSize);
+
+          context.beginPath();
+          context.arc(0, 0, this.circleSize, 0, 2 * Math.PI);
+          context.fillStyle = body.render.fillStyle || '#F35'; // Ensure visibility
+          context.fill();
+
+          context.restore();
+
+          // Re-enable default rendering for the next frame or other contexts
+          body.render.visible = true;
         }
       });
     });
@@ -189,7 +236,7 @@ class Simulation {
       correctedForce.y -= 1; // Steer up
     }
 
-    const forceMultiplier = 0.5;
+    const forceMultiplier = 1;
     correctedForce.x *= forceMultiplier;
     correctedForce.y *= forceMultiplier;
 
@@ -204,8 +251,16 @@ class Simulation {
         const distanceVector = Vector.sub(body.position, other.position);
         const distanceMagnitude = Vector.magnitude(distanceVector);
 
-        if (distanceMagnitude < minDistance && distanceMagnitude > 0) {
-          const repelForce = Vector.div(distanceVector, distanceMagnitude * distanceMagnitude);
+        // Approach 1: Decrease the minimum distance to start repulsion from further away
+        // You can adjust this value to find a suitable distance for your simulation
+        const effectiveMinDistance = minDistance * 0.8; // For example, 80% of the original minDistance
+
+        if (distanceMagnitude < effectiveMinDistance && distanceMagnitude > 0) {
+          // Approach 2: Increase the magnitude of the repulsion force
+          // This makes the repulsion effect stronger when bodies are within the effectiveMinDistance
+          const repelForceMagnitude = 1 / (distanceMagnitude * distanceMagnitude);
+          const repelForce = Vector.mult(Vector.normalise(distanceVector), repelForceMagnitude * 100); // Increase the multiplier to strengthen the force
+
           repulsion = Vector.add(repulsion, repelForce);
         }
       }
