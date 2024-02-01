@@ -1,5 +1,7 @@
 # koi pond
 
+live at https://isaacbowen.github.io/koi-pond/
+
 I wanted to know if the following behavioral logic chunks, combined, would result in natural flocking behavior:
 
 1. you have a limited field of vision, in the direction that you're facing.
