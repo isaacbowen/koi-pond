@@ -131,15 +131,15 @@ class Simulation {
         if (body.isStatic) return;
 
         const currentForce = Vector.mult(this.getCurrentForce(body), 0.25);
-        const boundaryForce = Vector.mult(this.getEdgeRepulsionForce(body), 10);
+        const edgeRepulsionForce = Vector.mult(this.getEdgeRepulsionForce(body), 20);
         const socialForce = Vector.mult(this.getSocialForce(body, 20), 20);
-        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 10);
+        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 50);
 
         const netForce = Vector.add(
           currentForce,
           Vector.add(
             antiSocialForce,
-            Vector.add(boundaryForce, socialForce)
+            Vector.add(edgeRepulsionForce, socialForce)
           )
         );
 
@@ -207,32 +207,17 @@ class Simulation {
   }
 
   getEdgeRepulsionForce(body: Body) {
-    const canvasWidth = this.render.canvas.width;
-    const canvasHeight = this.render.canvas.height;
-    const comfortableDistance = 100; // Distance from the edge where bodies start to feel "uncomfortable"
     const maxForce = 0.05; // Maximum repulsion force
+    const comfortableDistance = 100; // Distance from the edge where bodies start to feel "uncomfortable"
 
-    let forceX = 0;
-    let forceY = 0;
+    // Calculate distance to the nearest edge on the X and Y axes
+    const distanceToNearestEdgeX = Math.min(body.position.x, this.render.canvas.width - body.position.x);
+    const distanceToNearestEdgeY = Math.min(body.position.y, this.render.canvas.height - body.position.y);
 
-    // Calculate distance to the nearest edge on the X axis
-    const distanceToNearestEdgeX = Math.min(body.position.x, canvasWidth - body.position.x);
-    // Calculate distance to the nearest edge on the Y axis
-    const distanceToNearestEdgeY = Math.min(body.position.y, canvasHeight - body.position.y);
+    // Use the new helper method to calculate repulsion force
+    const forceX = this.calculateRepulsionForce(distanceToNearestEdgeX, comfortableDistance, maxForce) * (body.position.x < this.render.canvas.width / 2 ? 1 : -1);
+    const forceY = this.calculateRepulsionForce(distanceToNearestEdgeY, comfortableDistance, maxForce) * (body.position.y < this.render.canvas.height / 2 ? 1 : -1);
 
-    // Calculate repulsion force on the X axis
-    if (distanceToNearestEdgeX < comfortableDistance) {
-      const intensityX = (comfortableDistance - distanceToNearestEdgeX) / comfortableDistance;
-      forceX = (body.position.x < canvasWidth / 2 ? 1 : -1) * maxForce * intensityX ** 2; // Quadratic increase for stronger effect near edge
-    }
-
-    // Calculate repulsion force on the Y axis
-    if (distanceToNearestEdgeY < comfortableDistance) {
-      const intensityY = (comfortableDistance - distanceToNearestEdgeY) / comfortableDistance;
-      forceY = (body.position.y < canvasHeight / 2 ? 1 : -1) * maxForce * intensityY ** 2; // Quadratic increase for stronger effect near edge
-    }
-
-    // Apply the repulsion force to the body
     return { x: forceX, y: forceY };
   }
 
@@ -310,28 +295,22 @@ class Simulation {
 
   antiSocialForce(body: Body) {
     const personalSpaceRadius = this.viewDistance / 10; // The radius within which the body desires personal space
-    const repulsionStrength = 0.05; // Adjust this value to control the strength of the repulsion force
+    const maxForce = 0.05; // Adjust this value to control the strength of the repulsion force
 
-    // Initialize a vector to accumulate all repulsion forces
     let repulsionForce: Vector = { x: 0, y: 0 };
-
-    // Use getVisibleBodies to find bodies within the field of view of the current body
     const visibleBodies = this.getVisibleBodies(body);
 
     visibleBodies.forEach(other => {
-      if (other === body) return; // Ignore the body itself
+      if (other === body) return;
 
       const distanceVector = Vector.sub(body.position, other.position);
       const distance = Vector.magnitude(distanceVector);
 
-      // Only consider bodies within the personal space radius and within the field of view
       if (distance < personalSpaceRadius) {
-        // Calculate a repulsion vector, inversely proportional to the square of the distance
+        const repulsionMagnitude = this.calculateRepulsionForce(distance, personalSpaceRadius, maxForce);
         const normalizedDistanceVector = Vector.normalise(distanceVector);
-        const repulsionMagnitude = repulsionStrength / Math.pow(distance / personalSpaceRadius, 2);
         const repulsion = Vector.mult(normalizedDistanceVector, repulsionMagnitude);
 
-        // Accumulate the repulsion force
         repulsionForce = Vector.add(repulsionForce, repulsion);
       }
     });
@@ -377,6 +356,14 @@ class Simulation {
       y: Math.sin(angle)
     };
     return desiredDirection; // This vector can be scaled as needed
+  }
+
+  calculateRepulsionForce(currentDistance: number, comfortableDistance: number, maxForce: number) {
+    if (currentDistance < comfortableDistance) {
+      const intensity = (comfortableDistance - currentDistance) / comfortableDistance;
+      return maxForce * intensity ** 2; // Quadratic increase for stronger effect near threshold
+    }
+    return 0;
   }
 }
 
