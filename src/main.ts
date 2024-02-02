@@ -105,7 +105,7 @@ class Simulation {
   }
 
   manageBodyDynamics() {
-    const maxSpeed = 5; // Maximum speed a body can have
+    const maxSpeed = 4; // Maximum speed a body can have
     const minSpeed = 0.1; // Minimum speed to ensure bodies are always moving
 
     Events.on(this.engine, 'beforeUpdate', () => {
@@ -115,10 +115,10 @@ class Simulation {
         // this gets used all over the place; calculate it once per update
         body.visibleNeighbors = this.getVisibleBodies(body);
 
-        const currentForce = Vector.mult(this.getCurrentForce(body), 0.25);
-        const edgeRepulsionForce = Vector.mult(this.getEdgeRepulsionForce(body), 20);
-        const socialForce = Vector.mult(this.getSocialForce(body, 20), 20);
-        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 0);
+        const currentForce = Vector.mult(this.getCurrentForce(body), 0.1);
+        const edgeRepulsionForce = Vector.mult(this.getEdgeRepulsionForce(body, 2), 1);
+        const socialForce = Vector.mult(this.getSocialForce(body, 20), 40);
+        const antiSocialForce = Vector.mult(this.getAntiSocialForce(body, 2), 2);
 
         const netForce = Vector.add(
           currentForce,
@@ -187,8 +187,7 @@ class Simulation {
     return Vector.normalise(perpendicular);
   }
 
-  getEdgeRepulsionForce(body: Body) {
-    const maxForce = 0.05; // Maximum repulsion force
+  getEdgeRepulsionForce(body: Bod, baseForce: number) {
     const comfortableDistance = 100; // Distance from the edge where bodies start to feel "uncomfortable"
 
     // Calculate distance to the nearest edge on the X and Y axes
@@ -196,13 +195,15 @@ class Simulation {
     const distanceToNearestEdgeY = Math.min(body.position.y, this.render.canvas.height - body.position.y);
 
     // Use the new helper method to calculate repulsion force
-    const forceX = this.calculateRepulsionForce(distanceToNearestEdgeX, comfortableDistance, maxForce) * (body.position.x < this.render.canvas.width / 2 ? 1 : -1);
-    const forceY = this.calculateRepulsionForce(distanceToNearestEdgeY, comfortableDistance, maxForce) * (body.position.y < this.render.canvas.height / 2 ? 1 : -1);
+    const forceX = this.calculateRepulsionForce(distanceToNearestEdgeX, comfortableDistance, baseForce) * (body.position.x < this.render.canvas.width / 2 ? 1 : -1);
+    const forceY = this.calculateRepulsionForce(distanceToNearestEdgeY, comfortableDistance, baseForce) * (body.position.y < this.render.canvas.height / 2 ? 1 : -1);
 
     return { x: forceX, y: forceY };
   }
 
   getSocialForce(body: BodyWithVisibleNeighbors, radius: number) {
+    const baseline = 1; // Prevent division by zero, ensure some level of force
+    const scalingFactor = 1 / (body.visibleNeighbors.length + baseline); // Inverse relationship with the number of neighbors
     const minGap = ((this.fieldOfViewDegrees / 18) * Math.PI) / 180; // Minimum gap: a tenth of what they can see
 
     if (body.visibleNeighbors.length === 0) {
@@ -239,7 +240,8 @@ class Simulation {
 
     if (largestGap > minGap && gapRadius > 0) {
       const desiredDirection = this.steerTowards(body, gapMidpoint);
-      return Vector.mult(desiredDirection, 0.01); // Adjust magnitude of the force as needed
+      // Apply the scaling factor to the force
+      return Vector.mult(desiredDirection, 0.01 * scalingFactor); // Adjust the magnitude as needed
     }
 
     return { x: 0, y: 0 }; // No significant gap found, or the gap is not clear
@@ -273,9 +275,9 @@ class Simulation {
     });
   }
 
-  antiSocialForce(body: BodyWithVisibleNeighbors) {
-    const personalSpaceRadius = this.viewDistance / 10; // The radius within which the body desires personal space
-    const maxForce = 0.05; // Adjust this value to control the strength of the repulsion force
+  getAntiSocialForce(body: BodyWithVisibleNeighbors, baseForce: number) {
+    const personalSpaceRadius = this.viewDistance / 10;
+    const speedScalingFactor = Math.min(Math.max(Vector.magnitude(body.velocity), 1), 3); // Scale with speed, within bounds
 
     let repulsionForce: Vector = { x: 0, y: 0 };
 
@@ -286,7 +288,7 @@ class Simulation {
       const distance = Vector.magnitude(distanceVector);
 
       if (distance < personalSpaceRadius) {
-        const repulsionMagnitude = this.calculateRepulsionForce(distance, personalSpaceRadius, maxForce);
+        const repulsionMagnitude = this.calculateRepulsionForce(distance, personalSpaceRadius, baseForce) * speedScalingFactor;
         const normalizedDistanceVector = Vector.normalise(distanceVector);
         const repulsion = Vector.mult(normalizedDistanceVector, repulsionMagnitude);
 
@@ -337,11 +339,12 @@ class Simulation {
     return desiredDirection; // This vector can be scaled as needed
   }
 
-  calculateRepulsionForce(currentDistance: number, comfortableDistance: number, maxForce: number) {
+  calculateRepulsionForce(currentDistance: number, comfortableDistance: number, baseForce: number) {
     if (currentDistance < comfortableDistance) {
       const intensity = (comfortableDistance - currentDistance) / comfortableDistance;
-      return maxForce * intensity ** 2; // Quadratic increase for stronger effect near threshold
+      return baseForce * intensity ** 2; // Quadratic increase for stronger effect near threshold
     }
+
     return 0;
   }
 }
