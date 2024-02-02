@@ -187,7 +187,7 @@ class Simulation {
     return Vector.normalise(perpendicular);
   }
 
-  getEdgeRepulsionForce(body: Bod, baseForce: number) {
+  getEdgeRepulsionForce(body: Body, baseForce: number) {
     const comfortableDistance = 100; // Distance from the edge where bodies start to feel "uncomfortable"
 
     // Calculate distance to the nearest edge on the X and Y axes
