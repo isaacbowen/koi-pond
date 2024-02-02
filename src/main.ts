@@ -1,4 +1,4 @@
-import { Engine, Render, Bodies, World, Runner, Body, Events, Vector } from 'matter-js';
+import { Engine, Render, Bodies, World, Runner, Body, Events, Vector, Query } from 'matter-js';
 
 class Simulation {
   engine: Engine;
@@ -28,7 +28,6 @@ class Simulation {
     });
 
     // Additional setup...
-    this.applyCircularCurrent();
     this.addBodies();
     this.manageBodyDynamics();
     this.manageBodyShape();
@@ -54,26 +53,6 @@ class Simulation {
     Render.lookAt(this.render, {
       min: { x: 0, y: 0 },
       max: { x: window.innerWidth, y: window.innerHeight }
-    });
-  }
-
-  applyCircularCurrent() {
-    const currentStrength = 0.0005; // Adjust this value to control the strength of the current
-
-    Events.on(this.engine, 'beforeUpdate', () => {
-      this.engine.world.bodies.forEach(body => {
-        if (!body.isStatic) {
-          // Calculate the vector from the body to the center of the canvas
-          const toCenter = Vector.sub({ x: this.render.canvas.width / 2, y: this.render.canvas.height / 2 }, body.position);
-
-          // Calculate a perpendicular vector to create a circular motion (counter-clockwise)
-          const perpendicular = Vector.perp(toCenter);
-          const normalized = Vector.normalise(perpendicular);
-
-          // Apply the force to induce circular motion
-          Body.applyForce(body, body.position, Vector.mult(normalized, currentStrength));
-        }
-      });
     });
   }
 
@@ -138,34 +117,30 @@ class Simulation {
   }
 
   manageBodyDynamics() {
-    const minDistance = this.circleSize * 10; // Minimum distance for breathing room
     const maxSpeed = 5; // Maximum speed a body can have
-    const minSpeed = 1; // Minimum speed to ensure bodies are always moving
-    const boundaryMargin = (10 * this.scale); // Distance from the edge within which bodies start turning back
+    const minSpeed = 0.1; // Minimum speed to ensure bodies are always moving
 
     Events.on(this.engine, 'beforeUpdate', () => {
       const { world } = this.engine;
 
-      world.bodies.forEach(body => {
+      world.bodies.forEach((body, index) => {
         if (body.isStatic) return;
 
-        let force = { x: 0, y: 0 };
+        const currentForce = Vector.mult(this.getCurrentForce(body), 0.1);
+        const boundaryForce = Vector.mult(this.getEdgeRepulsionForce(body), 10);
+        const socialForce = Vector.mult(this.getSocialForce(body, 20), 20);
+        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 1);
 
-        // Calculate repulsion from nearby bodies for breathing room
-        const repulsion = this.calculateRepulsion(body, minDistance);
-        force = Vector.add(force, repulsion);
+        const netForce = Vector.add(
+          currentForce,
+          Vector.add(
+            antiSocialForce,
+            Vector.add(boundaryForce, socialForce)
+          )
+        );
 
-        // If the body is not too close to others, apply steering direction
-        if (Vector.magnitude(repulsion) < 0.01) {
-          const steeringDirection = this.calculateSteeringDirection(body);
-          force = Vector.add(force, steeringDirection);
-        }
-
-        // Check for boundaries and steer back if necessary
-        force = this.checkForBoundaries(body, force, this.render.canvas.width, this.render.canvas.height, boundaryMargin);
-
-        // Apply the force as acceleration
-        Body.applyForce(body, body.position, { x: force.x * 0.001, y: force.y * 0.001 });
+        // Apply the force as adjusted acceleration
+        Body.applyForce(body, body.position, { x: netForce.x * 0.001, y: netForce.y * 0.001 });
 
         // Enforce velocity envelope
         const currentSpeed = Vector.magnitude(body.velocity);
@@ -176,9 +151,6 @@ class Simulation {
           const scaledVelocity = Vector.normalise(body.velocity);
           Body.setVelocity(body, { x: scaledVelocity.x * minSpeed, y: scaledVelocity.y * minSpeed });
         }
-
-        // Update orientation based on velocity
-        Body.setAngle(body, Math.atan2(body.velocity.y, body.velocity.x));
       });
     });
   }
@@ -221,134 +193,187 @@ class Simulation {
     });
   }
 
-  checkForBoundaries(body: Body, force: Vector, canvasWidth: number, canvasHeight: number, boundaryMargin: number): Vector {
-    const correctedForce = { ...force };
+  getCurrentForce(body: Body) {
+    // Calculate the vector from the body to the center of the canvas
+    const toCenter = Vector.sub({ x: this.render.canvas.width / 2, y: this.render.canvas.height / 2 }, body.position);
 
-    if (body.position.x < boundaryMargin) {
-      correctedForce.x += 1; // Steer right
-    } else if (body.position.x > canvasWidth - boundaryMargin) {
-      correctedForce.x -= 1; // Steer left
-    }
-
-    if (body.position.y < boundaryMargin) {
-      correctedForce.y += 1; // Steer down
-    } else if (body.position.y > canvasHeight - boundaryMargin) {
-      correctedForce.y -= 1; // Steer up
-    }
-
-    const forceMultiplier = 1;
-    correctedForce.x *= forceMultiplier;
-    correctedForce.y *= forceMultiplier;
-
-    return correctedForce;
+    // Calculate a perpendicular vector to create a circular motion (counter-clockwise)
+    const perpendicular = Vector.perp(toCenter);
+    return Vector.normalise(perpendicular);
   }
 
-  calculateRepulsion(body: Body, minDistance: number) {
-    let repulsion = { x: 0, y: 0 };
+  getEdgeRepulsionForce(body: Body) {
+    const canvasWidth = this.render.canvas.width;
+    const canvasHeight = this.render.canvas.height;
+    const comfortableDistance = 100; // Distance from the edge where bodies start to feel "uncomfortable"
+    const maxForce = 0.05; // Maximum repulsion force
+
+    let forceX = 0;
+    let forceY = 0;
+
+    // Calculate distance to the nearest edge on the X axis
+    const distanceToNearestEdgeX = Math.min(body.position.x, canvasWidth - body.position.x);
+    // Calculate distance to the nearest edge on the Y axis
+    const distanceToNearestEdgeY = Math.min(body.position.y, canvasHeight - body.position.y);
+
+    // Calculate repulsion force on the X axis
+    if (distanceToNearestEdgeX < comfortableDistance) {
+      const intensityX = (comfortableDistance - distanceToNearestEdgeX) / comfortableDistance;
+      forceX = (body.position.x < canvasWidth / 2 ? 1 : -1) * maxForce * intensityX ** 2; // Quadratic increase for stronger effect near edge
+    }
+
+    // Calculate repulsion force on the Y axis
+    if (distanceToNearestEdgeY < comfortableDistance) {
+      const intensityY = (comfortableDistance - distanceToNearestEdgeY) / comfortableDistance;
+      forceY = (body.position.y < canvasHeight / 2 ? 1 : -1) * maxForce * intensityY ** 2; // Quadratic increase for stronger effect near edge
+    }
+
+    // Apply the repulsion force to the body
+    return { x: forceX, y: forceY };
+  }
+
+  getSocialForce(body: Body, radius: number) {
+    const fieldOfView = (180 * Math.PI) / 180; // Convert to radians
+    const visibleBodies = this.getVisibleBodies(body, fieldOfView, radius);
+    const minGap = (10 * Math.PI) / 180; // 10 degrees in radians
+
+    if (visibleBodies.length === 0) {
+      return { x: 0, y: 0 }; // No force if no visible bodies
+    }
+
+    let angles = visibleBodies.map(other => {
+      const toOther = Vector.sub(other.position, body.position);
+      return Math.atan2(toOther.y, toOther.x);
+    }).sort((a, b) => a - b);
+
+    angles.push(angles[0] + Math.PI * 2); // Include wrap-around angle
+
+    let largestGap = 0;
+    let gapMidpoint = 0;
+    let gapRadius = 0;
+
+    for (let i = 0; i < angles.length - 1; i++) {
+      let gap = angles[i + 1] - angles[i];
+      if (gap > largestGap && gap > minGap) {
+        const midpointAngle = angles[i] + gap / 2;
+        const distanceToNearestBody = this.getDistanceToNearestBody(body, midpointAngle, radius);
+
+        // Half the distance to the nearest body in the direction of the gap midpoint will be the radius
+        const circleRadius = distanceToNearestBody / 2;
+
+        if (this.isCircleClear(body, midpointAngle, circleRadius, visibleBodies)) {
+          largestGap = gap;
+          gapMidpoint = midpointAngle;
+          gapRadius = circleRadius;
+        }
+      }
+    }
+
+    if (largestGap > minGap && gapRadius > 0) {
+      const desiredDirection = this.steerTowards(body, gapMidpoint);
+      return Vector.mult(desiredDirection, 0.01); // Adjust magnitude of the force as needed
+    }
+
+    return { x: 0, y: 0 }; // No significant gap found, or the gap is not clear
+  }
+
+  getDistanceToNearestBody(body: Body, angle: number, searchRadius: number) {
+    const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+    let minDistance = searchRadius;
 
     this.engine.world.bodies.forEach(other => {
-      if (body !== other && !other.isStatic) {
-        const distanceVector = Vector.sub(body.position, other.position);
-        const distanceMagnitude = Vector.magnitude(distanceVector);
-
-        // Approach 1: Decrease the minimum distance to start repulsion from further away
-        // You can adjust this value to find a suitable distance for your simulation
-        const effectiveMinDistance = minDistance * 0.8; // For example, 80% of the original minDistance
-
-        if (distanceMagnitude < effectiveMinDistance && distanceMagnitude > 0) {
-          // Approach 2: Increase the magnitude of the repulsion force
-          // This makes the repulsion effect stronger when bodies are within the effectiveMinDistance
-          const repelForceMagnitude = 1 / (distanceMagnitude * distanceMagnitude);
-          const repelForce = Vector.mult(Vector.normalise(distanceVector), repelForceMagnitude * 100); // Increase the multiplier to strengthen the force
-
-          repulsion = Vector.add(repulsion, repelForce);
+      if (other !== body && !other.isStatic) {
+        const toOther = Vector.sub(other.position, body.position);
+        const distance = Vector.magnitude(toOther);
+        if (distance < minDistance) {
+          const angleToOther = Math.atan2(toOther.y, toOther.x);
+          if (Math.abs(angle - angleToOther) <= (10 * Math.PI) / 180) { // Check if within a 10-degree cone
+            minDistance = distance;
+          }
         }
       }
     });
 
-    return repulsion;
+    return minDistance;
   }
 
-  calculateSteeringDirection(body: Body) {
-    const currentDirection: Vector = { x: Math.cos(body.angle), y: Math.sin(body.angle) };
-    const fieldOfView = Math.PI * 0.75; // lil less than 180 degrees
-    const visibleBodies = this.getVisibleBodies(body, fieldOfView);
-
-    if (visibleBodies.length === 0) {
-      return currentDirection; // Maintain current direction if no visible bodies
-    }
-
-    // B1: Nearest visible body to B0
-    const B1 = visibleBodies[0];
-
-    // B2: Nearest neighbor to B1 that is visible to B0 and not occluded by B1
-    const B2 = this.getNonOccludedNeighbor(B1, visibleBodies, body);
-
-    if (!B2) {
-      // If there's no B2, maintain current direction
-      // return this.steerTowards(body, B1.position);
-      return currentDirection;
-    }
-
-    // Steer towards midpoint between B1 and B2
-    const midpoint = { x: (B1.position.x + B2.position.x) / 2, y: (B1.position.y + B2.position.y) / 2 };
-    return this.steerTowards(body, midpoint);
+  isCircleClear(body: Body, angle: number, radius: number, visibleBodies: Body[]) {
+    const circleCenter = Vector.add(body.position, Vector.mult({ x: Math.cos(angle), y: Math.sin(angle) }, radius));
+    return !visibleBodies.some(other => {
+      const distance = Vector.magnitude(Vector.sub(circleCenter, other.position));
+      return distance < radius; // Check if any body is within the circle
+    });
   }
 
-  getVisibleBodies(body: Body, fieldOfView: number) {
-    return this.engine.world.bodies.filter(other => {
+  antiSocialForce(body: Body) {
+    const personalSpaceRadius = 50 * this.scale; // The radius within which the body desires personal space
+    const repulsionStrength = 0.05; // Adjust this value to control the strength of the repulsion force
+
+    // Initialize a vector to accumulate all repulsion forces
+    let repulsionForce: Vector = { x: 0, y: 0 };
+
+    // Use Query.region to find bodies within the personal space radius
+    const nearbyBodies = Query.region(this.engine.world.bodies, {
+      min: { x: body.position.x - personalSpaceRadius, y: body.position.y - personalSpaceRadius },
+      max: { x: body.position.x + personalSpaceRadius, y: body.position.y + personalSpaceRadius }
+    });
+
+    nearbyBodies.forEach(other => {
+      if (other === body || other.isStatic) return; // Ignore the body itself and static bodies
+
+      const distanceVector = Vector.sub(body.position, other.position);
+      const distance = Vector.magnitude(distanceVector);
+
+      // Only consider bodies within the personal space radius
+      if (distance < personalSpaceRadius) {
+        // Calculate a repulsion vector, inversely proportional to the square of the distance
+        const normalizedDistanceVector = Vector.normalise(distanceVector);
+        const repulsionMagnitude = repulsionStrength / Math.pow(distance / personalSpaceRadius, 2);
+        const repulsion = Vector.mult(normalizedDistanceVector, repulsionMagnitude);
+
+        // Accumulate the repulsion force
+        repulsionForce = Vector.add(repulsionForce, repulsion);
+      }
+    });
+
+    return repulsionForce;
+  }
+
+  getVisibleBodies(body: Body, fieldOfView: number, searchRadius: number) {
+    // Define a bounding box around the body based on the search radius
+    const boundingBox = {
+      min: { x: body.position.x - searchRadius, y: body.position.y - searchRadius },
+      max: { x: body.position.x + searchRadius, y: body.position.y + searchRadius }
+    };
+
+    // Use Query.region to get all bodies within the bounding box
+    const bodiesInRegion = Query.region(this.engine.world.bodies, boundingBox);
+
+    // Filter these bodies by actual distance and field of view
+    return bodiesInRegion.filter(other => {
       if (other === body || other.isStatic) return false;
 
       const toOther = Vector.sub(other.position, body.position);
+      const distance = Vector.magnitude(toOther);
       const bodyDirection = Vector.create(Math.cos(body.angle), Math.sin(body.angle));
-
       const angleToOther = Vector.angle(bodyDirection, toOther);
 
-      // Check if within field of view
-      return angleToOther <= fieldOfView / 2;
+      // Check if within field of view and within the actual circular search radius
+      return angleToOther <= fieldOfView / 2 && distance <= searchRadius;
     }).sort((a, b) => {
-      // Sort by distance to B0
+      // Sort by distance to the body of interest
       const distanceA = Vector.magnitude(Vector.sub(body.position, a.position));
       const distanceB = Vector.magnitude(Vector.sub(body.position, b.position));
       return distanceA - distanceB;
     });
   }
 
-  getNonOccludedNeighbor(B1: Body, visibleBodies: Body[], B0: Body) {
-    for (let B2 of visibleBodies) {
-      if (B2 === B1) continue; // Skip B1 itself
-
-      // Check if B1 occludes B2 from B0's perspective
-      if (!this.isOccluded(B0, B1, B2)) {
-        return B2; // B2 is visible and not occluded by B1
-      }
-    }
-    return null; // No non-occluded B2 found
-  }
-
-  isOccluded(B0: Body, B1: Body, B2: Body) {
-    // Vector from B0 to B1
-    const vectorB0B1 = Vector.sub(B1.position, B0.position);
-    const normalizedB0B1 = Vector.normalise(vectorB0B1);
-
-    // Vector from B0 to B2
-    const vectorB0B2 = Vector.sub(B2.position, B0.position);
-    const normalizedB0B2 = Vector.normalise(vectorB0B2);
-
-    // Calculate the dot product of the normalized vectors
-    const dotProduct = Vector.dot(normalizedB0B1, normalizedB0B2);
-
-    // Calculate the angle in degrees between the vectors
-    const angleBetween = Math.acos(dotProduct) * (180 / Math.PI);
-
-    // If the angle is less than 15 degrees, consider B2 occluded by B1
-    return angleBetween < 5;
-  }
-
-  steerTowards(body: Body, target: Vector) {
-    const desiredDirection = Vector.sub(target, body.position);
-    const normalizedDesiredDirection = Vector.normalise(desiredDirection);
-    return normalizedDesiredDirection; // This vector can be scaled as needed
+  steerTowards(body: Body, angle: number) {
+    const desiredDirection = {
+      x: Math.cos(angle),
+      y: Math.sin(angle)
+    };
+    return desiredDirection; // This vector can be scaled as needed
   }
 }
 
