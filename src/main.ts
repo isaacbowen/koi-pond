@@ -5,9 +5,13 @@ class Simulation {
   render: Render;
   scale: number;
   circleSize: number;
+  fieldOfViewDegrees: number;
+  viewDistance: number;
 
   constructor(elementId: string) {
     this.scale = 2;
+    this.fieldOfViewDegrees = 180;
+    this.viewDistance = 200 * this.scale;
     this.circleSize = 5 * this.scale;
 
     // Create an engine
@@ -126,10 +130,10 @@ class Simulation {
       world.bodies.forEach((body, index) => {
         if (body.isStatic) return;
 
-        const currentForce = Vector.mult(this.getCurrentForce(body), 0.1);
+        const currentForce = Vector.mult(this.getCurrentForce(body), 0.25);
         const boundaryForce = Vector.mult(this.getEdgeRepulsionForce(body), 10);
         const socialForce = Vector.mult(this.getSocialForce(body, 20), 20);
-        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 1);
+        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 10);
 
         const netForce = Vector.add(
           currentForce,
@@ -165,30 +169,30 @@ class Simulation {
     Events.on(this.render, 'afterRender', (event) => {
       const { context } = this.render;
       this.engine.world.bodies.forEach(body => {
-        if (!body.isStatic && !body.render.visible) {
-          // Custom rendering logic for bodies with default rendering disabled
-          const speed = Vector.magnitude(body.velocity);
-          const maxSpeed = 20; // Adjust as necessary
-          const elongationFactor = Math.min(speed / maxSpeed, 1);
+        if (body.render.visible) return;
 
-          const length = this.circleSize + (this.circleSize * elongationFactor * 0.8);
-          const width = this.circleSize * (1 - (elongationFactor * 0.5));
+        // Custom rendering logic for bodies with default rendering disabled
+        const speed = Vector.magnitude(body.velocity);
+        const maxSpeed = 20; // Adjust as necessary
+        const elongationFactor = Math.min(speed / maxSpeed, 1);
 
-          context.save();
-          context.translate(body.position.x, body.position.y);
-          context.rotate(Math.atan2(body.velocity.y, body.velocity.x));
-          context.scale(length / this.circleSize, width / this.circleSize);
+        const length = this.circleSize + (this.circleSize * elongationFactor * 0.8);
+        const width = this.circleSize * (1 - (elongationFactor * 0.5));
 
-          context.beginPath();
-          context.arc(0, 0, this.circleSize, 0, 2 * Math.PI);
-          context.fillStyle = body.render.fillStyle || '#F35'; // Ensure visibility
-          context.fill();
+        context.save();
+        context.translate(body.position.x, body.position.y);
+        context.rotate(Math.atan2(body.velocity.y, body.velocity.x));
+        context.scale(length / this.circleSize, width / this.circleSize);
 
-          context.restore();
+        context.beginPath();
+        context.arc(0, 0, this.circleSize, 0, 2 * Math.PI);
+        context.fillStyle = body.render.fillStyle || '#F35'; // Ensure visibility
+        context.fill();
 
-          // Re-enable default rendering for the next frame or other contexts
-          body.render.visible = true;
-        }
+        context.restore();
+
+        // Re-enable default rendering for the next frame or other contexts
+        body.render.visible = true;
       });
     });
   }
@@ -233,9 +237,8 @@ class Simulation {
   }
 
   getSocialForce(body: Body, radius: number) {
-    const fieldOfView = (180 * Math.PI) / 180; // Convert to radians
-    const visibleBodies = this.getVisibleBodies(body, fieldOfView, radius);
-    const minGap = (10 * Math.PI) / 180; // 10 degrees in radians
+    const visibleBodies = this.getVisibleBodies(body);
+    const minGap = ((this.fieldOfViewDegrees / 18) * Math.PI) / 180; // Minimum gap: a tenth of what they can see
 
     if (visibleBodies.length === 0) {
       return { x: 0, y: 0 }; // No force if no visible bodies
@@ -306,25 +309,22 @@ class Simulation {
   }
 
   antiSocialForce(body: Body) {
-    const personalSpaceRadius = 50 * this.scale; // The radius within which the body desires personal space
+    const personalSpaceRadius = this.viewDistance / 10; // The radius within which the body desires personal space
     const repulsionStrength = 0.05; // Adjust this value to control the strength of the repulsion force
 
     // Initialize a vector to accumulate all repulsion forces
     let repulsionForce: Vector = { x: 0, y: 0 };
 
-    // Use Query.region to find bodies within the personal space radius
-    const nearbyBodies = Query.region(this.engine.world.bodies, {
-      min: { x: body.position.x - personalSpaceRadius, y: body.position.y - personalSpaceRadius },
-      max: { x: body.position.x + personalSpaceRadius, y: body.position.y + personalSpaceRadius }
-    });
+    // Use getVisibleBodies to find bodies within the field of view of the current body
+    const visibleBodies = this.getVisibleBodies(body);
 
-    nearbyBodies.forEach(other => {
-      if (other === body || other.isStatic) return; // Ignore the body itself and static bodies
+    visibleBodies.forEach(other => {
+      if (other === body) return; // Ignore the body itself
 
       const distanceVector = Vector.sub(body.position, other.position);
       const distance = Vector.magnitude(distanceVector);
 
-      // Only consider bodies within the personal space radius
+      // Only consider bodies within the personal space radius and within the field of view
       if (distance < personalSpaceRadius) {
         // Calculate a repulsion vector, inversely proportional to the square of the distance
         const normalizedDistanceVector = Vector.normalise(distanceVector);
@@ -339,7 +339,10 @@ class Simulation {
     return repulsionForce;
   }
 
-  getVisibleBodies(body: Body, fieldOfView: number, searchRadius: number) {
+  getVisibleBodies(body: Body) {
+    const fieldOfViewRadians = (this.fieldOfViewDegrees * Math.PI) / 180; // Convert degrees to radians
+    const searchRadius = this.viewDistance;
+
     // Define a bounding box around the body based on the search radius
     const boundingBox = {
       min: { x: body.position.x - searchRadius, y: body.position.y - searchRadius },
@@ -351,7 +354,7 @@ class Simulation {
 
     // Filter these bodies by actual distance and field of view
     return bodiesInRegion.filter(other => {
-      if (other === body || other.isStatic) return false;
+      if (other === body) return false;
 
       const toOther = Vector.sub(other.position, body.position);
       const distance = Vector.magnitude(toOther);
@@ -359,7 +362,7 @@ class Simulation {
       const angleToOther = Vector.angle(bodyDirection, toOther);
 
       // Check if within field of view and within the actual circular search radius
-      return angleToOther <= fieldOfView / 2 && distance <= searchRadius;
+      return angleToOther <= fieldOfViewRadians / 2 && distance <= searchRadius;
     }).sort((a, b) => {
       // Sort by distance to the body of interest
       const distanceA = Vector.magnitude(Vector.sub(body.position, a.position));
