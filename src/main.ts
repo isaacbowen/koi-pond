@@ -1,5 +1,7 @@
 import { Engine, Render, Bodies, World, Runner, Body, Events, Vector, Query } from 'matter-js';
 
+type BodyWithVisibleNeighbors = Body & { visibleNeighbors: Body[] };
+
 class Simulation {
   engine: Engine;
   render: Render;
@@ -7,12 +9,14 @@ class Simulation {
   circleSize: number;
   fieldOfViewDegrees: number;
   viewDistance: number;
+  bodies: BodyWithVisibleNeighbors[];
 
   constructor(elementId: string) {
     this.scale = 2;
     this.fieldOfViewDegrees = 180;
     this.viewDistance = 200 * this.scale;
     this.circleSize = 5 * this.scale;
+    this.bodies = [];
 
     // Create an engine
     this.engine = Engine.create();
@@ -61,14 +65,13 @@ class Simulation {
   }
 
   addBodies() {
-    const bodies: Body[] = []; // All bodies, both static and dynamic
     const centerX = this.render.canvas.width / 2;
     const centerY = this.render.canvas.height / 2;
     const size = this.circleSize;
     const layerDistance = 7 * size;
 
     let layer = 0;
-    while (bodies.length < 60) { // Adjust for a complete hexagonal pattern
+    while (this.bodies.length < 60) { // Adjust for a complete hexagonal pattern
       const bodiesInLayer = layer === 0 ? 1 : 6 * layer;
       const angleStep = Math.PI * 2 / bodiesInLayer;
 
@@ -77,47 +80,28 @@ class Simulation {
         const x = centerX + (layerDistance * layer) * Math.cos(angle);
         const y = centerY + (layerDistance * layer) * Math.sin(angle);
 
-        const circle = Bodies.circle(x, y, size, {
+        const body = Bodies.circle(x, y, size, {
           angle: angle + Math.PI / 2
-        });
+        }) as BodyWithVisibleNeighbors;
 
-        this.setBodyStatic(circle);
+        body.render.fillStyle = 'transparent';
+        body.render.strokeStyle = '#aaa';
+        body.render.lineWidth = (2 * this.scale);
+        body.render.opacity = 1;
+        Body.setStatic(body, true);
 
-        World.add(this.engine.world, circle);
-        bodies.push(circle); // Add to bodies array
+        World.add(this.engine.world, body);
+        this.bodies.push(body); // Add to bodies array
       }
 
       layer++;
     }
 
     setInterval(() => {
-      const body = bodies.shift()!;
-      this.toggleBody(body);
-      bodies.push(body);
+      const body = this.bodies.shift()!;
+      Body.setStatic(body, !body.isStatic);
+      this.bodies.push(body);
     }, 100 / this.engine.timing.timeScale);
-  }
-
-  toggleBody(body: Body) {
-    if (body.isStatic) {
-      this.setBodyDynamic(body);
-    } else {
-      this.setBodyStatic(body);
-    }
-  }
-
-  setBodyDynamic(body: Body) {
-    body.render.fillStyle = '#F35';
-    body.render.lineWidth = 0;
-    body.render.opacity = 1;
-    Body.setStatic(body, false);
-  }
-
-  setBodyStatic(body: Body) {
-    body.render.fillStyle = 'transparent';
-    body.render.strokeStyle = '#aaa';
-    body.render.lineWidth = (2 * this.scale);
-    body.render.opacity = 1;
-    Body.setStatic(body, true);
   }
 
   manageBodyDynamics() {
@@ -125,15 +109,16 @@ class Simulation {
     const minSpeed = 0.1; // Minimum speed to ensure bodies are always moving
 
     Events.on(this.engine, 'beforeUpdate', () => {
-      const { world } = this.engine;
-
-      world.bodies.forEach((body, index) => {
+      this.bodies.forEach((body) => {
         if (body.isStatic) return;
+
+        // this gets used all over the place; calculate it once per update
+        body.visibleNeighbors = this.getVisibleBodies(body);
 
         const currentForce = Vector.mult(this.getCurrentForce(body), 0.25);
         const edgeRepulsionForce = Vector.mult(this.getEdgeRepulsionForce(body), 20);
         const socialForce = Vector.mult(this.getSocialForce(body, 20), 20);
-        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 50);
+        const antiSocialForce = Vector.mult(this.antiSocialForce(body), 0);
 
         const netForce = Vector.add(
           currentForce,
@@ -171,7 +156,6 @@ class Simulation {
       this.engine.world.bodies.forEach(body => {
         if (body.render.visible) return;
 
-        // Custom rendering logic for bodies with default rendering disabled
         const speed = Vector.magnitude(body.velocity);
         const maxSpeed = 20; // Adjust as necessary
         const elongationFactor = Math.min(speed / maxSpeed, 1);
@@ -186,13 +170,10 @@ class Simulation {
 
         context.beginPath();
         context.arc(0, 0, this.circleSize, 0, 2 * Math.PI);
-        context.fillStyle = body.render.fillStyle || '#F35'; // Ensure visibility
+        context.fillStyle = '#F35';
         context.fill();
 
         context.restore();
-
-        // Re-enable default rendering for the next frame or other contexts
-        body.render.visible = true;
       });
     });
   }
@@ -221,15 +202,14 @@ class Simulation {
     return { x: forceX, y: forceY };
   }
 
-  getSocialForce(body: Body, radius: number) {
-    const visibleBodies = this.getVisibleBodies(body);
+  getSocialForce(body: BodyWithVisibleNeighbors, radius: number) {
     const minGap = ((this.fieldOfViewDegrees / 18) * Math.PI) / 180; // Minimum gap: a tenth of what they can see
 
-    if (visibleBodies.length === 0) {
+    if (body.visibleNeighbors.length === 0) {
       return { x: 0, y: 0 }; // No force if no visible bodies
     }
 
-    let angles = visibleBodies.map(other => {
+    let angles = body.visibleNeighbors.map(other => {
       const toOther = Vector.sub(other.position, body.position);
       return Math.atan2(toOther.y, toOther.x);
     }).sort((a, b) => a - b);
@@ -249,7 +229,7 @@ class Simulation {
         // Half the distance to the nearest body in the direction of the gap midpoint will be the radius
         const circleRadius = distanceToNearestBody / 2;
 
-        if (this.isCircleClear(body, midpointAngle, circleRadius, visibleBodies)) {
+        if (this.isCircleClear(body, midpointAngle, circleRadius, body.visibleNeighbors)) {
           largestGap = gap;
           gapMidpoint = midpointAngle;
           gapRadius = circleRadius;
@@ -293,14 +273,13 @@ class Simulation {
     });
   }
 
-  antiSocialForce(body: Body) {
+  antiSocialForce(body: BodyWithVisibleNeighbors) {
     const personalSpaceRadius = this.viewDistance / 10; // The radius within which the body desires personal space
     const maxForce = 0.05; // Adjust this value to control the strength of the repulsion force
 
     let repulsionForce: Vector = { x: 0, y: 0 };
-    const visibleBodies = this.getVisibleBodies(body);
 
-    visibleBodies.forEach(other => {
+    body.visibleNeighbors.forEach(other => {
       if (other === body) return;
 
       const distanceVector = Vector.sub(body.position, other.position);
