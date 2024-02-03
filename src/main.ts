@@ -206,8 +206,8 @@ class Simulation {
   }
 
   getSocialForce(body: BodyWithVisibleNeighbors, radius: number) {
-    // aim for a gap of 10 degrees to 90 degrees
-    const minGap = (10 * Math.PI) / 180;
+    // aim for a gap of 5 degrees to 90 degrees
+    const minGap = (5 * Math.PI) / 180;
     const maxGap = (90 * Math.PI) / 180;
 
     if (body.neighborsInView.length === 0) {
