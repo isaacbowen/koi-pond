@@ -1,13 +1,13 @@
 # koi pond
 
-live at https://isaacbowen.github.io/koi-pond/
+live at [koipond.me](https://koipond.me/)
 
-I wanted to know if the following behavioral logic chunks, combined, would result in natural flocking behavior:
+I wanted to know if the following behavioral logic chunks, combined, would result in natural schooling:
 
-1. you have a limited field of vision, in the direction that you're facing.
-2. look for your nearest neighbor. then, look for _their_ closest neighbor (staying within your field of vision, and recalling that you can't see _through_ anybody). steer directly into the gap between those neighbors.
-3. prefer to keep _some_ breathing room between y'all.
-4. allow yourself to be gently guided by some higher-level current. in this case, there's a gentle circular current through the whole pool.
+1. your field of vision is limited
+2. steer into you-sized gaps
+3. respect personal space
+4. go with the flow
 
 turns out chatgpt is REALLY GOOD at translating this kind of thing into code. so, so, so much fun.
 
