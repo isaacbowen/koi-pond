@@ -34,7 +34,8 @@ class Simulation {
       options: {
         width: window.innerWidth,
         height: window.innerHeight,
-        wireframes: false
+        wireframes: false,
+        background: '#14151e',
       }
     });
 
